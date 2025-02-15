@@ -1,30 +1,48 @@
 const { PrismaClient } = require('@prisma/client');
 const express = require('express');
-const cors=require("cors");
-
-
+const cors = require("cors");
+const bcrypt = require('bcrypt'); 
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
 app.use(cors());
-// Example route to fetch all users (for debugging or display purposes)
+
+const isValidEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
+const isValidPassword = (password) => {
+  const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+  return passwordRegex.test(password);
+};
+
+
 app.get('/users', async (req, res) => {
   const users = await prisma.user.findMany();
   res.json(users);
 });
 
-// Route to sign up a new user
 app.post('/signup', async (req, res) => {
   const { email, password } = req.body;
 
-  // Check if both email and password are provided
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
+  // Validate email
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: 'Invalid email format.' });
+  }
+
+  // Validate password
+  if (!isValidPassword(password)) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long and include one lowercase letter, one uppercase letter, one number, and one special character.' });
+  }
+
   try {
-    // Check if the email is already registered
+
     const existingUser = await prisma.user.findUnique({
       where: { email: email }
     });
@@ -33,33 +51,32 @@ app.post('/signup', async (req, res) => {
       return res.status(400).json({ error: 'Email already exists.' });
     }
 
-    // Create a new user
-     // Respond with the created user
+    const hashedPassword = await bcrypt.hash(password, 10); 
+
+    const newUser = await prisma.user.create({
+      data: {
+        email: email,
+        password: hashedPassword 
+      }
+    });
+
+    res.status(201).json(newUser);
   } catch (error) {
     console.error('Error signing up user:', error);
     res.status(500).json({ error: 'Error signing up user', details: error.message });
   }
-  const newUser = await prisma.user.create({
-    data: {
-      email: email,
-      password: password // Store the password as is (for production, consider hashing it using bcrypt)
-    }
-  });
-
-  res.status(201).json(newUser);
 });
 
-// Route to sign in an existing user
 app.post('/signin', async (req, res) => {
   const { email, password } = req.body;
 
-  // Check if both email and password are provided
+
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
   try {
-    // Find the user by email
+
     const user = await prisma.user.findUnique({
       where: { email: email }
     });
@@ -68,8 +85,9 @@ app.post('/signin', async (req, res) => {
       return res.status(400).json({ error: 'User not found.' });
     }
 
-    // Check if the password matches
-    if (user.password !== password) {
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid password.' });
     }
 
